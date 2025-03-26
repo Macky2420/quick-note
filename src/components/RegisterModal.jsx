@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { Modal } from "antd";
 import { useState } from "react";
 
@@ -55,3 +56,14 @@ const RegisterModal = ({ registerModalVisible, setRegisterModalVisible }) => {
 };
 
 export default RegisterModal;
+=======
+import React from 'react'
+
+const RegisterModal = () => {
+  return (
+    <div>RegisterModal</div>
+  )
+}
+
+export default RegisterModal
+>>>>>>> 7c0400503a540b23b2ac13f97234c979c2b4f01d

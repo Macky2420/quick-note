@@ -12,7 +12,10 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.0.14",
     "antd": "^5.24.3",
+<<<<<<< HEAD
     "firebase": "^11.5.0",
+=======
+>>>>>>> 7c0400503a540b23b2ac13f97234c979c2b4f01d
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.3.0",
