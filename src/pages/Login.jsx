@@ -1,6 +1,7 @@
 import React, { useState} from 'react'
 import background from '../assets/background.jpg';
 import LoginModal from '../components/LoginModal';
+import RegisterModal from '../components/RegisterModal';
 
 export const Login = () => {
     const [loginModalVisible, setLoginModalVisible] = useState(false);
@@ -34,21 +35,21 @@ export const Login = () => {
             <div className="max-w-3xl text-center mx-auto">
             <h1 className="block font-medium text-gray-200 text-4xl sm:text-5xl md:text-6xl lg:text-7xl">
                 Welcome to 
+                <br/>
                 <span className="relative">
                 <span className="bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">
-                    My
+                    QuickNotes
                 </span>
                 <span className="absolute left-0 bottom-0 w-full h-1 bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500"></span>
-                </span> 
-                File Management System
+                </span>
             </h1>
             </div>
 
             <div className="max-w-3xl text-center mx-auto">
-              <p className="text-lg text-gray-400">Easily upload, organize, and access your files anytime, anywhere. Fast, secure, and built for simplicity.</p>
+              <p className="text-lg text-gray-400">Capture Your Thoughts Anytime, Anywhere!</p>
             </div>
             <div className="text-center">
-              <button className="cursor-pointer inline-flex justify-center items-center gap-x-3 text-center bg-gradient-to-tl from-violet-600 to-blue-600 shadow-lg shadow-transparent hover:shadow-violet-700/50 border border-transparent text-white text-sm font-medium rounded-full focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 focus:ring-offset-white py-3 px-6">
+              <button onClick={handleShowRegisterModal} className="cursor-pointer inline-flex justify-center items-center gap-x-3 text-center bg-gradient-to-tl from-violet-600 to-blue-600 shadow-lg shadow-transparent hover:shadow-violet-700/50 border border-transparent text-white text-sm font-medium rounded-full focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 focus:ring-offset-white py-3 px-6">
                 Get started
                 <svg className="flex-shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
               </button>
@@ -60,6 +61,10 @@ export const Login = () => {
       <LoginModal
         loginModalVisible = {loginModalVisible}
         setLoginModalVisible = {setLoginModalVisible}
+      />
+      <RegisterModal
+        registerModalVisible = {registerModalVisible}
+        setRegisterModalVisible = {setRegisterModalVisible}
       />
     </>
   )
