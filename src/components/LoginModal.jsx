@@ -43,14 +43,6 @@ const LoginModal = ({ loginModalVisible, setLoginModalVisible }) => {
         <button className="w-full py-3 text-sm font-semibold rounded-lg bg-gradient-to-tl from-violet-600 to-blue-600 text-white shadow-lg hover:shadow-violet-700/50 focus:ring-2 focus:ring-blue-600">
           Sign in
         </button>
-        <div className="flex items-center text-xs text-gray-400 uppercase py-3">
-          <span className="flex-1 border-t border-gray-200"></span>
-          <span className="px-3">Or</span>
-          <span className="flex-1 border-t border-gray-200"></span>
-        </div>
-        <button className="w-full py-3 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 flex items-center justify-center gap-x-2">
-          <GoogleIcon /> Sign in with Google
-        </button>
       </div>
     </Modal>
   );
