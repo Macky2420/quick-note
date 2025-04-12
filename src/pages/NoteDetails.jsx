@@ -4,116 +4,120 @@ import { Input, Button, message } from 'antd';
 import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { auth, db } from '../database/firebaseConfig';
 import { ref, get, update, serverTimestamp } from 'firebase/database';
-import { openDB } from 'idb';
+import { initIndexedDB } from '../utils/db'; // Assume shared DB util
 
 const { TextArea } = Input;
 
 const NoteDetail = () => {
-  const { noteId } = useParams();
+  const { noteId, userId } = useParams();
   const navigate = useNavigate();
   const [note, setNote] = useState(null);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
 
-  // Initialize IndexedDB with notes store
-  const initIndexedDB = async () => {
-    return openDB('offline-notes', 3, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains('notes')) {
-          db.createObjectStore('notes', { keyPath: 'id' });
-        }
-      },
-    });
-  };
-
   useEffect(() => {
-    const fetchNote = async () => {
+    const loadNote = async () => {
       try {
         const user = auth.currentUser;
         if (!user) {
-          throw new Error('User not authenticated');
+          messageApi.error('Authentication required');
+          return navigate('/login');
         }
 
-        const db = await initIndexedDB();
-        let noteFound = false;
-
-        // Check IndexedDB first
-        const localNote = await db.get('notes', noteId);
+        const dbInstance = await initIndexedDB();
+        const isLocalNote = noteId.startsWith('local_');
+        
+        // Try to load from local DB first
+        const localNote = await dbInstance.get('notes', noteId);
         if (localNote) {
-          setNote(localNote);
-          setTitle(localNote.title);
-          setContent(localNote.content);
-          noteFound = true;
+          setNoteState(localNote);
         }
 
-        // Check Firebase if online
-        if (navigator.onLine) {
+        // Fetch from Firebase if online and not local note
+        if (!isLocalNote && navigator.onLine) {
           const snapshot = await get(ref(db, `users/${user.uid}/notes/${noteId}`));
           if (snapshot.exists()) {
-            const firebaseNote = {
-              id: noteId,
-              ...snapshot.val(),
-              updatedAt: snapshot.val().updatedAt || Date.now()
-            };
-            
-            // Update local cache with Firebase data
-            await db.put('notes', firebaseNote);
-            
-            // Only update state if Firebase data is newer
-            if (!noteFound || firebaseNote.updatedAt > (localNote?.updatedAt || 0)) {
-              setNote(firebaseNote);
-              setTitle(firebaseNote.title);
-              setContent(firebaseNote.content);
-            }
-            noteFound = true;
+            const firebaseNote = { id: noteId, ...snapshot.val() };
+            await dbInstance.put('notes', firebaseNote);
+            setNoteState(firebaseNote);
           }
         }
 
-        if (!noteFound) {
-          throw new Error('Note not found');
+        if (!localNote && !(isLocalNote || snapshot?.exists())) {
+          messageApi.error('Note not found');
+          navigate('/');
         }
       } catch (error) {
-        messageApi.error(error.message);
+        messageApi.error(`Failed to load note: ${error.message}`);
+        navigate('/');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchNote();
-  }, [noteId, messageApi]);
+    const authUnsubscribe = auth.onAuthStateChanged(user => {
+      if (user) loadNote();
+      else navigate('/login');
+    });
+
+    return () => authUnsubscribe();
+  }, [noteId]);
+
+  const setNoteState = (noteData) => {
+    setNote(noteData);
+    setTitle(noteData.title);
+    setContent(noteData.content);
+  };
 
   const handleSave = async () => {
+    setSaving(true);
     try {
       const user = auth.currentUser;
-      if (!user) throw new Error('User not authenticated');
+      if (!user) throw new Error('Authentication required');
 
-      const db = await initIndexedDB();
+      const dbInstance = await initIndexedDB();
+      const isLocalNote = noteId.startsWith('local_');
+      const now = navigator.onLine ? serverTimestamp() : Date.now();
+
       const updatedNote = {
+        ...note,
         id: noteId,
         title,
         content,
-        updatedAt: navigator.onLine ? serverTimestamp() : Date.now(),
-        needsSync: !navigator.onLine
+        updatedAt: now,
+        needsSync: isLocalNote || !navigator.onLine
       };
 
-      // Update local cache immediately
-      await db.put('notes', updatedNote);
-      setNote(updatedNote);
-
+      // Update local DB
+      await dbInstance.put('notes', updatedNote);
+      
+      // Sync with Firebase if online
       if (navigator.onLine) {
-        await update(ref(db, `users/${user.uid}/notes/${noteId}`), {
-          title,
-          content,
-          updatedAt: serverTimestamp()
-        });
-        messageApi.success('Note updated successfully!');
+        if (isLocalNote) {
+          const newNoteRef = push(ref(db, `users/${user.uid}/notes`));
+          await set(newNoteRef, { ...updatedNote, id: newNoteRef.key });
+          await dbInstance.delete('notes', noteId);
+          navigate(`/notes/${newNoteRef.key}`);
+        } else {
+          await update(ref(db, `users/${user.uid}/notes/${noteId}`), {
+            title,
+            content,
+            updatedAt: serverTimestamp()
+          });
+        }
+        messageApi.success('Changes saved successfully');
       } else {
-        messageApi.warning('Changes saved locally');
+        messageApi.warning('Changes saved locally - will sync when online');
       }
+
+      setNote(updatedNote);
     } catch (error) {
-      messageApi.error(`Error saving note: ${error.message}`);
+      messageApi.error(`Save failed: ${error.message}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -125,21 +129,13 @@ const NoteDetail = () => {
     );
   }
 
-  if (!note) {
-    return (
-      <div className="text-center py-8 text-gray-500">
-        Note not found
-      </div>
-    );
-  }
-
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       {contextHolder}
       <div className="flex justify-between items-center mb-8">
         <Button
           icon={<ArrowLeftOutlined />}
-          onClick={() => navigate('/home')}
+          onClick={() => navigate(`/home/${userId}`)}
           className="flex items-center"
         >
           Back
@@ -148,6 +144,7 @@ const NoteDetail = () => {
           type="primary"
           icon={<SaveOutlined />}
           onClick={handleSave}
+          loading={saving}
           className="bg-blue-500 hover:bg-blue-600"
         >
           Save

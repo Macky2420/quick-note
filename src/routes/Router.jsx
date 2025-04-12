@@ -32,11 +32,11 @@ export const router = createBrowserRouter([
         ]
     },
     {
-        path: '/profile',
+        path: '/profile/:userId',
         element: <Layout/>,
         children: [
             {
-                path: ':userId',
+                index: true,
                 element: <Profile/>
             }
         ]

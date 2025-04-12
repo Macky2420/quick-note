@@ -1,10 +1,13 @@
+// Import the React 19 patch for Ant Design (this must be the first import)
+import '@ant-design/v5-patch-for-react-19';
+
 import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Space, Popconfirm, FloatButton, Button, message } from 'antd';
 import { DeleteOutlined, PlusOutlined, FileTextOutlined } from '@ant-design/icons';
 import { auth, db } from '../database/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
 import { ref, onValue, off, remove, set, get, push, serverTimestamp } from 'firebase/database';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { openDB } from 'idb';
 import NewNote from '../components/NewNote';
 import noteIcon from '../assets/note.svg';
@@ -14,8 +17,8 @@ const Home = () => {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [messageApi, contextHolder] = message.useMessage();
+  const navigate = useNavigate();
 
-  // Initialize IndexedDB
   const initIndexedDB = async () => {
     return openDB('offline-notes', 3, {
       upgrade(db) {
@@ -29,14 +32,13 @@ const Home = () => {
     });
   };
 
-  // Sync offline data with Firebase
   const syncOfflineData = async (userId) => {
-    const db = await initIndexedDB();
-    const tx = db.transaction(['pendingNotes', 'pendingDeletions'], 'readwrite');
+    const idb = await initIndexedDB();
+    const tx = idb.transaction(['notes', 'pendingDeletions'], 'readwrite');
     
-    // Sync pending notes
-    const pendingNotes = await tx.objectStore('pendingNotes').getAll();
-    for (const note of pendingNotes) {
+    // Sync local notes needing sync
+    const notesToSync = await tx.objectStore('notes').getAll();
+    for (const note of notesToSync.filter(n => n.needsSync)) {
       try {
         const newNoteRef = push(ref(db, `users/${userId}/notes`));
         await set(newNoteRef, {
@@ -44,7 +46,7 @@ const Home = () => {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
-        await tx.objectStore('pendingNotes').delete(note.id);
+        await tx.objectStore('notes').delete(note.id);
       } catch (error) {
         messageApi.error(`Sync failed: ${error.message}`);
       }
@@ -68,58 +70,66 @@ const Home = () => {
         setLoading(false);
         return;
       }
-  
+
       const notesRef = ref(db, `users/${user.uid}/notes`);
       
-      // Hybrid data loader
-      const loadData = async (snapshot) => {
+      const unsubscribe = onValue(notesRef, async (snapshot) => {
         try {
-          let notesData = snapshot?.val();
-          
-          // 1. Get online data if available
-          const onlineNotes = notesData ? Object.entries(notesData) : [];
-  
-          // 2. Get offline notes from IndexedDB
-          const offlineDB = await initIndexedDB();
-          const localNotes = await offlineDB.getAll('notes');
-          
-          // 3. Merge both sources
+          const idb = await initIndexedDB();
+          const [firebaseNotes, localNotes] = await Promise.all([
+            new Promise(resolve => {
+              const notesData = snapshot.val();
+              resolve(notesData ? Object.entries(notesData).map(([id, note]) => ({ id, ...note })) : []);
+            }),
+            idb.getAll('notes')
+          ]);
+
+          // Merge notes with local ones taking priority
           const mergedNotes = [
-            ...onlineNotes.map(([id, note]) => ({ id, ...note })),
-            ...localNotes
-          ].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
-  
+            ...firebaseNotes,
+            ...localNotes.filter(n => n.id.startsWith('local_'))
+          ].reduce((acc, note) => {
+            if (!acc.find(n => n.id === note.id)) acc.push(note);
+            return acc;
+          }, []);
+
+          // Update IndexedDB with latest Firebase notes
+          const tx = idb.transaction('notes', 'readwrite');
+          await Promise.all([
+            ...firebaseNotes.map(note => tx.store.put(note)),
+            tx.done
+          ]);
+
           setNotes(mergedNotes);
-          setLoading(false);
-  
         } catch (error) {
           messageApi.error(`Error loading notes: ${error.message}`);
+        } finally {
           setLoading(false);
         }
-      };
-  
-      const unsubscribe = onValue(notesRef, loadData);
-      
+      });
+
       // Initial load for offline case
       if (!navigator.onLine) {
-        get(notesRef).then(loadData).catch(() => loadData(null));
+        const idb = await initIndexedDB();
+        const localNotes = await idb.getAll('notes');
+        setNotes(localNotes);
+        setLoading(false);
       }
-  
-      // Online sync handler
+
       const handleOnline = async () => {
         await syncOfflineData(user.uid);
         messageApi.success('Changes synced!');
       };
-  
+
       window.addEventListener('online', handleOnline);
       return () => {
         off(notesRef, unsubscribe);
         window.removeEventListener('online', handleOnline);
       };
     });
-  
+
     return () => authUnsubscribe();
-  }, []);
+  }, [messageApi]);
 
   const handleDelete = async (id) => {
     try {
@@ -130,8 +140,8 @@ const Home = () => {
         await remove(ref(db, `users/${user.uid}/notes/${id}`));
         messageApi.success('Note deleted successfully!');
       } else {
-        const db = await initIndexedDB();
-        await db.put('pendingDeletions', { id });
+        const idb = await initIndexedDB();
+        await idb.put('pendingDeletions', { id });
         messageApi.warning('Deletion queued. Will sync when online.');
       }
     } catch (error) {
@@ -166,33 +176,50 @@ const Home = () => {
               ) : (
                 notes.map((note) => (
                   <Col key={note.id} xs={24} sm={12} md={12} lg={8}>
-                    <Link to={`/notes/${note.id}`}>
-                      <Card className="hover:shadow-xl transition-shadow duration-300 h-full group" hoverable>
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center gap-4 flex-1">
-                            <img src={noteIcon} alt="note" className="w-12 h-12 p-2 bg-blue-50 rounded-lg" />
-                            <div className="flex flex-col">
-                              <span className="font-medium text-gray-800 break-words">
-                                {note.title}
-                              </span>
-                            </div>
-                          </div>
-                          <Popconfirm
-                            title="Delete this note?"
-                            onConfirm={() => handleDelete(note.id)}
-                            okText="Delete"
-                            cancelText="Cancel"
-                            okButtonProps={{ danger: true }}
-                          >
-                            <Button 
-                              type="text"
-                              icon={<DeleteOutlined className="text-red-500 hover:text-red-700" />}
-                              className="hover:bg-gray-100 rounded-lg ml-4"
-                            />
-                          </Popconfirm>
+                    <Card
+                      className="hover:shadow-xl transition-shadow duration-300 h-full group relative"
+                      hoverable
+                    >
+                      {/* Click overlay for navigation */}
+                      <div 
+                        className="absolute inset-0 z-10 cursor-pointer" 
+                        onClick={() => navigate(`/notes/${note.id}`)}
+                      />
+                      
+                      <div className="flex justify-between items-center relative">
+                        <div className="flex items-center gap-4 flex-1">
+                          <img 
+                            src={noteIcon} 
+                            alt="note" 
+                            className="w-12 h-12 p-2 bg-blue-50 rounded-lg" 
+                          />
+                          <span className="font-medium text-gray-800 break-words">
+                            {note.title}
+                          </span>
                         </div>
-                      </Card>
-                    </Link>
+                        
+                        <Popconfirm
+                          title="Delete this note?"
+                          onConfirm={(e) => {
+                            e.preventDefault();
+                            handleDelete(note.id);
+                          }}
+                          okText="Delete"
+                          cancelText="Cancel"
+                          okButtonProps={{ danger: true }}
+                        >
+                          <Button 
+                            type="text"
+                            icon={<DeleteOutlined className="text-red-500 hover:text-red-700" />}
+                            className="hover:bg-gray-100 rounded-lg ml-4 z-20 relative"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                          />
+                        </Popconfirm>
+                      </div>
+                    </Card>
                   </Col>
                 ))
               )}
