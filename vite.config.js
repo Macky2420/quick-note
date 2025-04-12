@@ -9,12 +9,15 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['logo.svg'],
       manifest: {
-        name: 'QuickNote',
-        short_name: 'Note',
-        description: 'Your note-taking PWA',
-        theme_color: '#ffffff',
+        name: 'QuickNote PWA',
+        short_name: 'QuickNote',
+        start_url: '/',       
+        display: 'standalone',
+        background_color: '#ffffff',    
+        theme_color: '#000000',
+
         icons: [
           {
             src: '/icons1.png',
