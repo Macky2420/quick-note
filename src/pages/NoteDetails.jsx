@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Input, Button, message } from 'antd';
+import { Input, Button, message, Skeleton } from 'antd';
 import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { auth, db } from '../database/firebaseConfig';
 import { ref, get, update, serverTimestamp } from 'firebase/database';
-import { initIndexedDB } from '../utils/db'; // Assume shared DB util
 
 const { TextArea } = Input;
 
@@ -27,26 +26,13 @@ const NoteDetail = () => {
           return navigate('/login');
         }
 
-        const dbInstance = await initIndexedDB();
-        const isLocalNote = noteId.startsWith('local_');
-        
-        // Try to load from local DB first
-        const localNote = await dbInstance.get('notes', noteId);
-        if (localNote) {
-          setNoteState(localNote);
-        }
-
-        // Fetch from Firebase if online and not local note
-        if (!isLocalNote && navigator.onLine) {
-          const snapshot = await get(ref(db, `users/${user.uid}/notes/${noteId}`));
-          if (snapshot.exists()) {
-            const firebaseNote = { id: noteId, ...snapshot.val() };
-            await dbInstance.put('notes', firebaseNote);
-            setNoteState(firebaseNote);
-          }
-        }
-
-        if (!localNote && !(isLocalNote || snapshot?.exists())) {
+        const snapshot = await get(ref(db, `users/${user.uid}/notes/${noteId}`));
+        if (snapshot.exists()) {
+          const firebaseNote = { id: noteId, ...snapshot.val() };
+          setNote(firebaseNote);
+          setTitle(firebaseNote.title);
+          setContent(firebaseNote.content);
+        } else {
           messageApi.error('Note not found');
           navigate('/');
         }
@@ -64,13 +50,7 @@ const NoteDetail = () => {
     });
 
     return () => authUnsubscribe();
-  }, [noteId]);
-
-  const setNoteState = (noteData) => {
-    setNote(noteData);
-    setTitle(noteData.title);
-    setContent(noteData.content);
-  };
+  }, [noteId, messageApi, navigate]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -78,42 +58,14 @@ const NoteDetail = () => {
       const user = auth.currentUser;
       if (!user) throw new Error('Authentication required');
 
-      const dbInstance = await initIndexedDB();
-      const isLocalNote = noteId.startsWith('local_');
-      const now = navigator.onLine ? serverTimestamp() : Date.now();
-
-      const updatedNote = {
-        ...note,
-        id: noteId,
+      await update(ref(db, `users/${user.uid}/notes/${noteId}`), {
         title,
         content,
-        updatedAt: now,
-        needsSync: isLocalNote || !navigator.onLine
-      };
+        updatedAt: serverTimestamp()
+      });
 
-      // Update local DB
-      await dbInstance.put('notes', updatedNote);
-      
-      // Sync with Firebase if online
-      if (navigator.onLine) {
-        if (isLocalNote) {
-          const newNoteRef = push(ref(db, `users/${user.uid}/notes`));
-          await set(newNoteRef, { ...updatedNote, id: newNoteRef.key });
-          await dbInstance.delete('notes', noteId);
-          navigate(`/notes/${newNoteRef.key}`);
-        } else {
-          await update(ref(db, `users/${user.uid}/notes/${noteId}`), {
-            title,
-            content,
-            updatedAt: serverTimestamp()
-          });
-        }
-        messageApi.success('Changes saved successfully');
-      } else {
-        messageApi.warning('Changes saved locally - will sync when online');
-      }
-
-      setNote(updatedNote);
+      messageApi.success('Changes saved successfully');
+      setNote(prev => ({ ...prev, title, content }));
     } catch (error) {
       messageApi.error(`Save failed: ${error.message}`);
     } finally {
@@ -123,48 +75,72 @@ const NoteDetail = () => {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <span className="loading loading-spinner loading-lg"></span>
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <Skeleton active paragraph={{ rows: 8 }} />
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-4xl mx-auto px-4 py-8 min-h-screen">
       {contextHolder}
-      <div className="flex justify-between items-center mb-8">
+      
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <Button
           icon={<ArrowLeftOutlined />}
           onClick={() => navigate(`/home/${userId}`)}
-          className="flex items-center"
+          className="flex items-center border-gray-300 hover:border-blue-500 text-gray-700"
         >
           Back
         </Button>
+        
         <Button
           type="primary"
           icon={<SaveOutlined />}
           onClick={handleSave}
           loading={saving}
-          className="bg-blue-500 hover:bg-blue-600"
+          className="h-10 px-6 font-semibold bg-gradient-to-tr from-blue-700 to-green-600 border-transparent hover:shadow-lg hover:shadow-blue-700/30 transition-all"
         >
-          Save
+          Save Changes
         </Button>
       </div>
-      
-      <div className="space-y-6">
-        <Input
-          placeholder="Note Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          className="text-2xl font-semibold"
-        />
+
+      {/* Note Content Section */}
+      <div className="space-y-8">
+        {/* Title Input */}
+        <div className="relative">
+          <Input
+            placeholder=" "
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="block px-4 pb-2 pt-6 w-full bg-white text-2xl font-bold text-gray-800 rounded-lg border border-gray-300 hover:border-blue-500 focus:border-blue-500 peer"
+            id="note-title"
+          />
+        </div>
         
-        <TextArea
-          rows={15}
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Start writing your note..."
-          className="text-base"
+        {/* Content Textarea */}
+        <div className="relative">
+          <TextArea
+            placeholder=" "
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            className="block px-4 pb-2 pt-6 w-full bg-white text-base text-gray-700 rounded-lg border border-gray-300 hover:border-blue-500 focus:border-blue-500 peer"
+            autoSize={{ minRows: 15, maxRows: 25 }}
+            id="note-content"
+          />
+        </div>
+      </div>
+
+      {/* Mobile Save Button */}
+      <div className="sm:hidden fixed bottom-6 right-6">
+        <Button
+          type="primary"
+          shape="circle"
+          icon={<SaveOutlined className="text-lg" />}
+          onClick={handleSave}
+          loading={saving}
+          className="h-14 w-14 font-semibold bg-gradient-to-tr from-blue-700 to-green-600 border-transparent shadow-lg hover:shadow-blue-700/30"
         />
       </div>
     </div>

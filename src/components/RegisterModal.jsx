@@ -1,159 +1,170 @@
-import { Modal, message } from "antd";
+import { Modal, message, Form, Input, Button, Checkbox } from "antd";
 import { EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { auth, db } from "../database/firebaseConfig";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { ref, set, get } from "firebase/database";
-import { openDB } from "idb";
 import { useNavigate } from "react-router-dom";
 
-const InputField = ({ type, label, autoComplete, value, setValue, isPassword, error }) => {
-  const [showPassword, setShowPassword] = useState(false);
-  return (
-    <div className="relative border-gray">
-      <input
-        type={isPassword && !showPassword ? "password" : "text"}
-        className={`block px-2.5 pb-2.5 pt-4 w-full bg-white text-sm text-black rounded-lg border ${error ? "border-red-500" : "border-gray-200"} appearance-none focus:outline-none focus:ring-0 focus:border-green-900 peer`}
-        placeholder=" "
-        autoComplete={autoComplete}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-      />
-      <label className="absolute text-sm text-black duration-300 transform -translate-y-4 scale-75 top-2 z-10 origin-[0] bg-white px-2 peer-placeholder-shown:scale-100 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:top-1/2 peer-focus:top-2 peer-focus:scale-75 peer-focus:-translate-y-4 left-1">
-        {label}
-      </label>
-      {isPassword && (
-        <span
-          className="absolute top-1/2 right-3 transform -translate-y-1/2 cursor-pointer"
-          onClick={() => setShowPassword(!showPassword)}
-        >
-          {showPassword ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-        </span>
-      )}
-      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
-    </div>
-  );
-};
-
 const RegisterModal = ({ registerModalVisible, setRegisterModalVisible }) => {
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
-  const [errors, setErrors] = useState({});
+  const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
-  const [privacyTextClass, setPrivacyTextClass] = useState("text-gray");
   const navigate = useNavigate();
 
-  useEffect(() => {
-    setPrivacyTextClass(errors.privacy ? "text-red-500" : "text-gray");
-  }, [errors.privacy]);
-
-  const validateInputs = async () => {
-    let newErrors = {};
-
-    if (fullName.length < 5) newErrors.fullName = "Full name must be at least 5 characters long.";
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) newErrors.email = "Invalid email format.";
-    if (password.length < 8) newErrors.password = "Password must be at least 8 characters long.";
-    if (!acceptedPrivacy) newErrors.privacy = true;
-
+  const validateEmailUnique = async (_, value) => {
+    if (!value) return Promise.resolve();
+    
     const emailRef = ref(db, `users`);
     const snapshot = await get(emailRef);
-    if (snapshot.exists() && Object.values(snapshot.val()).some(user => user.email === email)) {
-      newErrors.email = "Email already exists.";
+    if (snapshot.exists() && Object.values(snapshot.val()).some(user => user.email === value)) {
+      return Promise.reject(new Error('Email already exists'));
     }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    
+    return Promise.resolve();
   };
 
-  const registerUser = async () => {
-    if (!(await validateInputs())) return;
-
+  const handleRegistration = async (values) => {
     setLoading(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, values.email, values.password);
       const user = userCredential.user;
       
-      await set(ref(db, `users/${user.uid}`), { fullName, email });
-      
-      messageApi.open({
-        type: "success",
-        content: "Registration successful!",
+      await set(ref(db, `users/${user.uid}`), { 
+        fullName: values.fullName, 
+        email: values.email 
       });
-      
-      setFullName("");
-      setEmail("");
-      setPassword("");
-      setAcceptedPrivacy(false);
-      setErrors({});
-      
+  
+      // Show success message first
+      message.success('Registration successful!');
+  
+      // Then close modal and navigate
       setRegisterModalVisible(false);
+      form.resetFields();
       navigate(`/home/${user.uid}`);
+  
     } catch (error) {
-      if (!navigator.onLine) {
-        const offlineDB = await openDB("offline-registrations", 1, {
-          upgrade(db) {
-            db.createObjectStore("users", { keyPath: "email" });
-          },
-        });
-        await offlineDB.put("users", { fullName, email, password, acceptedPrivacy });
-        messageApi.open({
-          type: "warning",
-          content: "No internet. Registration saved and will be retried when online.",
-        });
-      } else {
-        messageApi.open({
-          type: "error",
-          content: error.message,
-        });
+      let errorMessage = 'Registration failed. Please try again.';
+      switch(error.code) {
+        case 'auth/email-already-in-use':
+          errorMessage = 'Email already registered';
+          break;
+        case 'auth/weak-password':
+          errorMessage = 'Password must be at least 6 characters';
+          break;
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email format';
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = 'Network error. Check your connection';
+          break;
       }
+      message.error(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Modal open={registerModalVisible} onCancel={() => setRegisterModalVisible(false)} centered footer={null} className="backdrop-blur-md">
+    <Modal
+      open={registerModalVisible}
+      onCancel={() => setRegisterModalVisible(false)}
+      centered
+      footer={null}
+      className="backdrop-blur-md"
+      destroyOnClose
+    >
       {contextHolder}
-      {loading && <div className="absolute inset-0 flex justify-center items-center bg-white bg-opacity-50"><span className="loading loading-dots loading-lg"></span></div>}
-      <div className="flex flex-col items-center mb-4">
-        <h1 className="block text-xl font-bold bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">
-          Register
+      <div className="flex flex-col items-center mb-6">
+        <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-green-500 bg-clip-text text-transparent">
+          Create Account
         </h1>
+        <p className="text-gray-500 mt-2">Get started with QuickNote</p>
       </div>
-      <div className="flex flex-col space-y-4">
-        <InputField type="text" label="Full Name" autoComplete="name" value={fullName} setValue={setFullName} error={errors.fullName} />
-        <InputField type="text" label="Email" autoComplete="email" value={email} setValue={setEmail} error={errors.email} />
-        <InputField type="password" label="Password" autoComplete="new-password" value={password} setValue={setPassword} isPassword error={errors.password} />
-        
-        <div className="flex items-center">
-          <input
-            type="checkbox"
-            className="w-4 h-4 bg-white border border-gray-200 rounded focus:ring-3 focus:ring-green-900"
-            checked={acceptedPrivacy}
-            onChange={() => setAcceptedPrivacy(!acceptedPrivacy)}
-          />
-          <label className={`ml-3 text-sm ${privacyTextClass}`}>
-            I accept the <a href="#" className="text-green-900 hover:underline">Privacy Policy</a>
-          </label>
-        </div>
 
-        <button
-          type="button"
-          className="cursor-pointer w-full py-3 px-4 inline-flex justify-center items-center gap-x-2 text-sm font-semibold rounded-lg border border-transparent bg-gradient-to-tl from-violet-600 to-blue-600 shadow-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 focus:ring-offset-white"
-          onClick={registerUser}
-          disabled={loading}
+      <Form
+        form={form}
+        name="register"
+        onFinish={handleRegistration}
+        initialValues={{ privacy: false }}
+        scrollToFirstError
+        layout="vertical"
+      >
+        <Form.Item
+          label="Full Name"
+          name="fullName"
+          rules={[
+            { required: true, message: 'Please enter your full name' },
+            { min: 5, message: 'Minimum 5 characters required' }
+          ]}
         >
-          {loading ? (
-            <span className="loading loading-dots loading-lg text-white"></span>
-          ) : (
-            "Register"
-          )}
-        </button>
-      </div>
+          <Input
+            placeholder="John Doe"
+            className="rounded-lg border-gray-300 hover:border-blue-500 focus:border-blue-500 h-12"
+          />
+        </Form.Item>
+
+        <Form.Item
+          label="Email"
+          name="email"
+          rules={[
+            { required: true, message: 'Please enter your email' },
+            { type: 'email', message: 'Invalid email format' },
+            { validator: validateEmailUnique }
+          ]}
+        >
+          <Input
+            placeholder="john@example.com"
+            className="rounded-lg border-gray-300 hover:border-blue-500 focus:border-blue-500 h-12"
+          />
+        </Form.Item>
+
+        <Form.Item
+          label="Password"
+          name="password"
+          rules={[
+            { required: true, message: 'Please enter your password' },
+            { min: 8, message: 'Minimum 8 characters required' }
+          ]}
+        >
+          <Input.Password
+            placeholder="••••••••"
+            iconRender={(visible) => visible ? 
+              <EyeOutlined className="text-gray-400" /> : 
+              <EyeInvisibleOutlined className="text-gray-400" />}
+            className="rounded-lg border-gray-300 hover:border-blue-500 focus:border-blue-500 h-12"
+          />
+        </Form.Item>
+
+        <Form.Item
+          name="privacy"
+          valuePropName="checked"
+          rules={[
+            { 
+              validator: (_, value) => value ? 
+                Promise.resolve() : 
+                Promise.reject(new Error('You must accept the privacy policy')) 
+            }
+          ]}
+        >
+          <Checkbox className="text-gray-600">
+            I agree to the <a href="#" className="text-blue-600 hover:underline font-medium">Terms of Service</a> and {' '}
+            <a href="#" className="text-blue-600 hover:underline font-medium">Privacy Policy</a>
+          </Checkbox>
+        </Form.Item>
+
+        <Form.Item>
+          <Button
+            type="primary"
+            htmlType="submit"
+            block
+            loading={loading}
+            className="h-12 font-semibold text-lg bg-gradient-to-tr from-blue-700 to-green-600 border-transparent hover:shadow-lg hover:shadow-blue-700/30 transition-all"
+          >
+            {loading ? 'Creating Account...' : 'Create Account'}
+          </Button>
+        </Form.Item>
+      </Form>
     </Modal>
   );
 };

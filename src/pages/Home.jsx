@@ -6,8 +6,8 @@ import { Card, Row, Col, Space, Popconfirm, FloatButton, Button, message } from 
 import { DeleteOutlined, PlusOutlined, FileTextOutlined } from '@ant-design/icons';
 import { auth, db } from '../database/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
-import { ref, onValue, off, remove, set, get, push, serverTimestamp } from 'firebase/database';
-import { useNavigate } from 'react-router-dom';
+import { ref, onValue, off, remove, set, push, serverTimestamp } from 'firebase/database';
+import { useNavigate, useParams } from 'react-router-dom';
 import { openDB } from 'idb';
 import NewNote from '../components/NewNote';
 import noteIcon from '../assets/note.svg';
@@ -18,9 +18,10 @@ const Home = () => {
   const [loading, setLoading] = useState(true);
   const [messageApi, contextHolder] = message.useMessage();
   const navigate = useNavigate();
+  const { userId } = useParams();
 
-  const initIndexedDB = async () => {
-    return openDB('offline-notes', 3, {
+  const initIndexedDB = async () =>
+    openDB('offline-notes', 3, {
       upgrade(db) {
         if (!db.objectStoreNames.contains('notes')) {
           db.createObjectStore('notes', { keyPath: 'id' });
@@ -30,12 +31,11 @@ const Home = () => {
         }
       },
     });
-  };
 
   const syncOfflineData = async (userId) => {
     const idb = await initIndexedDB();
     const tx = idb.transaction(['notes', 'pendingDeletions'], 'readwrite');
-    
+
     // Sync local notes needing sync
     const notesToSync = await tx.objectStore('notes').getAll();
     for (const note of notesToSync.filter(n => n.needsSync)) {
@@ -44,7 +44,7 @@ const Home = () => {
         await set(newNoteRef, {
           ...note,
           createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
         });
         await tx.objectStore('notes').delete(note.id);
       } catch (error) {
@@ -72,35 +72,42 @@ const Home = () => {
       }
 
       const notesRef = ref(db, `users/${user.uid}/notes`);
-      
       const unsubscribe = onValue(notesRef, async (snapshot) => {
         try {
           const idb = await initIndexedDB();
           const [firebaseNotes, localNotes] = await Promise.all([
             new Promise(resolve => {
-              const notesData = snapshot.val();
-              resolve(notesData ? Object.entries(notesData).map(([id, note]) => ({ id, ...note })) : []);
+              const data = snapshot.val();
+              const list = data
+                ? Object.entries(data).map(([id, note]) => ({ id, ...note }))
+                : [];
+              resolve(list);
             }),
-            idb.getAll('notes')
+            idb.getAll('notes'),
           ]);
 
-          // Merge notes with local ones taking priority
-          const mergedNotes = [
+          // Merge notes, with local (unsynced) ones taking priority
+          const merged = [
             ...firebaseNotes,
-            ...localNotes.filter(n => n.id.startsWith('local_'))
+            ...localNotes.filter(n => n.id.startsWith('local_')),
           ].reduce((acc, note) => {
             if (!acc.find(n => n.id === note.id)) acc.push(note);
             return acc;
           }, []);
 
-          // Update IndexedDB with latest Firebase notes
-          const tx = idb.transaction('notes', 'readwrite');
-          await Promise.all([
-            ...firebaseNotes.map(note => tx.store.put(note)),
-            tx.done
-          ]);
+          // Sort notes in descending order by timestamp
+          const sorted = merged.sort((a, b) => {
+            const aTime = a.createdAt ?? a.updatedAt ?? 0;
+            const bTime = b.createdAt ?? b.updatedAt ?? 0;
+            return bTime - aTime;
+          });
 
-          setNotes(mergedNotes);
+          // Persist latest firebase notes to IndexedDB
+          const tx = idb.transaction('notes', 'readwrite');
+          firebaseNotes.forEach(note => tx.store.put(note));
+          await tx.done;
+
+          setNotes(sorted);
         } catch (error) {
           messageApi.error(`Error loading notes: ${error.message}`);
         } finally {
@@ -108,11 +115,12 @@ const Home = () => {
         }
       });
 
-      // Initial load for offline case
+      // Offline initial load sorted
       if (!navigator.onLine) {
         const idb = await initIndexedDB();
-        const localNotes = await idb.getAll('notes');
-        setNotes(localNotes);
+        const local = await idb.getAll('notes');
+        const sortedLocal = local.sort((a, b) => (b.createdAt ?? b.updatedAt ?? 0) - (a.createdAt ?? a.updatedAt ?? 0));
+        setNotes(sortedLocal);
         setLoading(false);
       }
 
@@ -153,7 +161,7 @@ const Home = () => {
     <>
       {contextHolder}
       <div className="max-w-4xl mx-auto px-4 py-8 min-h-screen flex flex-col">
-        <Card 
+        <Card
           title={
             <Space className="flex items-center">
               <FileTextOutlined className="text-blue-500" />
@@ -181,41 +189,35 @@ const Home = () => {
                       hoverable
                     >
                       {/* Click overlay for navigation */}
-                      <div 
-                        className="absolute inset-0 z-10 cursor-pointer" 
-                        onClick={() => navigate(`/notes/${note.id}`)}
+                      <div
+                        className="absolute inset-0 z-10 cursor-pointer"
+                        onClick={() => navigate(`/home/${userId}/${note.id}`)}
                       />
-                      
+
                       <div className="flex justify-between items-center relative">
                         <div className="flex items-center gap-4 flex-1">
-                          <img 
-                            src={noteIcon} 
-                            alt="note" 
-                            className="w-12 h-12 p-2 bg-blue-50 rounded-lg" 
+                          <img
+                            src={noteIcon}
+                            alt="note"
+                            className="w-12 h-12 p-2 bg-blue-50 rounded-lg"
                           />
                           <span className="font-medium text-gray-800 break-words">
                             {note.title}
                           </span>
                         </div>
-                        
+
                         <Popconfirm
                           title="Delete this note?"
-                          onConfirm={(e) => {
-                            e.preventDefault();
-                            handleDelete(note.id);
-                          }}
+                          onConfirm={(e) => { e.preventDefault(); handleDelete(note.id); }}
                           okText="Delete"
                           cancelText="Cancel"
                           okButtonProps={{ danger: true }}
                         >
-                          <Button 
+                          <Button
                             type="text"
                             icon={<DeleteOutlined className="text-red-500 hover:text-red-700" />}
                             className="hover:bg-gray-100 rounded-lg ml-4 z-20 relative"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                            }}
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
                           />
                         </Popconfirm>
                       </div>
@@ -236,7 +238,7 @@ const Home = () => {
           />
         </Card>
       </div>
-      
+
       <NewNote
         noteModalVisible={noteModalVisible}
         setNoteModalVisible={setNoteModalVisible}

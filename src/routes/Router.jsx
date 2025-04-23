@@ -22,7 +22,7 @@ export const router = createBrowserRouter([
         ]
     },
     {
-        path: '/notes/:noteId',
+        path: '/home/:userId/:noteId',
         element: <Layout/>,
         children: [
             {
