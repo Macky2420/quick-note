@@ -9,28 +9,34 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['logo.svg'],
+      includeAssets: ['favicon.svg', 'favicon.ico', 'robots.txt', 'apple-touch-icon.png'],
       manifest: {
-        name: 'QuickNote PWA',
-        short_name: 'QuickNote',
-        start_url: '/',       
+        name: 'BudgetEase',
+        short_name: 'BudgetEase',
+        description: 'A smart PWA for managing your budget with ease.',
+        theme_color: '#1890ff',
+        background_color: '#ffffff',
         display: 'standalone',
-        background_color: '#ffffff',    
-        theme_color: '#000000',
-
+        start_url: '/',
         icons: [
           {
-            src: '/icons1.png',
+            src: '/icons/icon-192x192.png',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/png',
           },
           {
-            src: '/icon2.png',
+            src: '/icons/icon-512x512.png',
             sizes: '512x512',
-            type: 'image/png'
-          }
-        ]
-      }
-    })
+            type: 'image/png',
+          },
+          {
+            src: '/icons/icon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any maskable',
+          },
+        ],
+      },
+    }),
   ],
 })
