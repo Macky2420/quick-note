@@ -11,9 +11,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'favicon.ico', 'robots.txt', 'apple-touch-icon.png'],
       manifest: {
-        name: 'BudgetEase',
-        short_name: 'BudgetEase',
-        description: 'A smart PWA for managing your budget with ease.',
+        name: 'QuickNote',
+        short_name: 'QuickNote',
+        description: 'A simple PWA note taking website.',
         theme_color: '#1890ff',
         background_color: '#ffffff',
         display: 'standalone',
